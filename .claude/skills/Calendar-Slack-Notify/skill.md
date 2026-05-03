@@ -79,7 +79,7 @@
 ใช้ **Slack connector** (MCP) เพื่อส่งข้อความ:
 
 - เรียก `slack_send_message` พร้อมข้อความจาก Step 4
-- Channel / recipient: กำหนดจาก environment variable `SLACK_CHANNEL` (เช่น `#general`, `@username`)
+- Channel: `#daily-reminders`
 
 **การจัดการข้อผิดพลาด:**
 - สำเร็จ → บันทึก log: `[INFO] Slack notification sent successfully for <DATE_TOMORROW>.`
@@ -92,7 +92,6 @@
 
 | Variable | Required | คำอธิบาย |
 |----------|----------|-----------|
-| `SLACK_CHANNEL` | Yes | Channel หรือ User ที่ต้องการส่งแจ้งเตือน เช่น `#daily-reminders` หรือ `@username` |
 | `GOOGLE_CALENDAR_ID` | No | Calendar ID ที่ต้องการตรวจสอบ ถ้าไม่ระบุ ใช้ primary calendar |
 
 ---
@@ -115,7 +114,7 @@
 |----|----------|
 | Google Calendar connector ไม่พร้อม | หยุดทันที, log error, ไม่ส่ง Slack |
 | ไม่มี Event ในวันถัดไป | หยุด, log info, ไม่ส่ง Slack |
-| `SLACK_CHANNEL` ไม่ได้ตั้งค่า | log error, หยุด — ไม่ส่งไปยัง channel ที่ไม่ได้กำหนด |
+| Slack connector ไม่พร้อม | log error, หยุด — ไม่ส่ง |
 | Slack ส่งไม่สำเร็จ | log error, ไม่ retry |
 | มี Event มากกว่า 10 รายการ | แสดงแค่ 10 รายการแรก พร้อมแจ้งจำนวนที่เหลือ |
 
@@ -146,7 +145,7 @@
 2. ตั้ง **Skill**: `Calendar-Slack-Notify`
 3. ตั้ง **Schedule**: `0 20 * * *` (ทุกคืน 20:00 Bangkok time — แจ้งเตือนล่วงหน้า 1 วัน)
 4. ตั้ง **Timezone**: `Asia/Bangkok`
-5. ตั้ง **Environment Variables**: `SLACK_CHANNEL`, `GOOGLE_CALENDAR_ID` (optional)
+5. ตั้ง **Environment Variables**: `GOOGLE_CALENDAR_ID` (optional)
 6. ตรวจสอบว่า Google Calendar connector และ Slack connector เชื่อมต่อแล้วใน **Settings → Connectors**
 7. บันทึกและเปิดใช้งาน Routine
 
