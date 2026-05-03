@@ -47,16 +47,14 @@ See the [skill instructions](.claude/skills/Claude-Routine-Guideline-Update/skil
 
 #### 1. Connect the GitHub Connector
 
-1. Open **claude.ai → Settings → Connectors** (or the equivalent Integrations panel).
+1. Open **claude.ai → Settings → Connectors**.
 2. Click **Add connector → GitHub**.
-3. Authorise Claude to access this repository (`{your-org}/claude-routine-guideline-update`).
+3. Authorise Claude to access this repository.
 4. Confirm the connector shows **Connected** status.
 
 If the connector is unavailable at run time, the skill aborts and logs an error — it will **not** fall back to shell commands.
 
 #### 2. Set Environment Variables
-
-Copy `env.example` to `.env` (local development only — never commit `.env`).
 
 For Claude Web Routine, set variables in **Settings → Routine → Environment**:
 
@@ -71,20 +69,9 @@ For Claude Web Routine, set variables in **Settings → Routine → Environment*
 
 1. In Claude Web, open **Routines → New Routine**.
 2. Set **Skill**: `Claude-Routine-Guideline-Update`
-3. Set **Schedule** (choose one):
-   - Weekly brief: `0 8 * * 1` (Monday 08:00 Bangkok time)
-   - Bi-weekly: `0 8 1,15 * *` (1st and 15th of each month)
-   - Daily scan: `0 7 * * *` (07:00 daily — high volume, use with care)
+3. Set **Schedule**: `0 8 * * 1` (Monday 08:00) or `0 7 * * *` (daily 07:00)
 4. Set **Timezone**: `Asia/Bangkok`
-5. Optionally pass a `TOPIC` argument to narrow the research scope.
-6. Save and enable the Routine.
-
-#### 4. Verify a Test Run
-
-1. Trigger a manual run from the Routine dashboard.
-2. Check this repository — a new file should appear under `articles/`.
-3. Check `reference/sources.md` for the appended source table.
-4. If LINE is configured, verify the push message was received.
+5. Save and enable.
 
 ---
 
@@ -101,28 +88,24 @@ See the [skill instructions](.claude/skills/Calendar-Event-Check/skill.md) for t
 | Requirement | Details |
 |-------------|--------|
 | Claude account | claude.ai with Routine (scheduled tasks) access |
-| GitHub connector | Connected in Claude settings — used for connectivity verification |
-| Google Cloud project | OAuth 2.0 credentials with Calendar API enabled |
-| Google Calendar | At least one calendar accessible by the OAuth account |
+| GitHub connector | Connected — used for liveness check at startup |
+| Google Calendar connector | Connected — reads calendar events via MCP (no OAuth credentials needed) |
 | LINE Messaging API | Optional — skip LINE step if absent |
 
 #### 1. Connect the GitHub Connector
 
-1. Open **claude.ai → Settings → Connectors**.
-2. Click **Add connector → GitHub** and authorise access to this repository.
-3. Confirm the connector shows **Connected** status.
+1. **claude.ai → Settings → Connectors → Add connector → GitHub**
+2. Authorise access to this repository.
+3. Confirm **Connected** status.
 
-The skill uses this connector as a liveness check at startup. If unavailable, the skill aborts rather than running in a degraded state.
+#### 2. Connect the Google Calendar Connector
 
-#### 2. Obtain a Google OAuth Refresh Token
+1. **claude.ai → Settings → Connectors → Add connector → Google Calendar**
+2. Sign in with the Google account whose calendar you want to check.
+3. Confirm **Connected** status.
 
-This is a one-time setup. The Routine uses the refresh token to generate short-lived access tokens on every run.
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services → Credentials**.
-2. Create an **OAuth 2.0 Client ID** (type: Desktop app or Web app).
-3. Enable the **Google Calendar API** in your project.
-4. Run the OAuth consent flow once locally (e.g. with `oauth2l` or a small Python script using `google-auth-oauthlib`) requesting the scope `https://www.googleapis.com/auth/calendar.readonly`.
-5. Save the returned `refresh_token` — this is long-lived and only needs to be generated once.
+> No Google Cloud project, no OAuth credentials, no refresh token needed.  
+> Authentication is handled entirely by the connector.
 
 #### 3. Set Environment Variables
 
@@ -130,24 +113,21 @@ For Claude Web Routine, set variables in **Settings → Routine → Environment*
 
 | Variable | Required | Value |
 |----------|----------|-------|
-| `GOOGLE_CALENDAR_ID` | Yes | `primary` or a full calendar address |
-| `GOOGLE_CLIENT_ID` | Yes | OAuth client ID from Google Cloud Console |
-| `GOOGLE_CLIENT_SECRET` | Yes | OAuth client secret |
-| `GOOGLE_REFRESH_TOKEN` | Yes | Long-lived refresh token from the consent flow |
 | `GITHUB_REPO_OWNER` | Yes | Your GitHub username or organisation name |
 | `GITHUB_REPO_NAME` | Yes | `claude-routine-guideline-update` (or your fork name) |
+| `GOOGLE_CALENDAR_ID` | No | Calendar ID — leave blank to use `primary` |
 | `LINE_CHANNEL_ACCESS_TOKEN` | No | LINE Messaging API long-lived channel access token |
 | `LINE_TO` | No | LINE User ID (`U...`) or Group ID (`C...`) |
 
-For local development, copy `env.example` to `.env` and fill in the values. **Never commit `.env`.**
+For local development, copy `env.example` → `.env` and fill in values. **Never commit `.env`.**
 
 #### 4. Create the Routine
 
-1. In Claude Web, open **Routines → New Routine**.
+1. **Routines → New Routine**
 2. Set **Skill**: `Calendar-Event-Check`
-3. Set **Schedule** — recommended: `0 21 * * *` (21:00 nightly — checks the next day's calendar at 9 PM Bangkok time)
+3. Set **Schedule**: `0 21 * * *` (21:00 nightly — checks next day's events each evening)
 4. Set **Timezone**: `Asia/Bangkok`
-5. Save and enable the Routine.
+5. Save and enable.
 
 Suggested schedules:
 
@@ -160,47 +140,20 @@ Suggested schedules:
 #### 5. Verify a Test Run
 
 1. Trigger a manual run from the Routine dashboard.
-2. If events exist for tomorrow, you should receive a LINE message within seconds.
-3. If no events exist, the skill completes silently — check the Routine run log for `[INFO] No events tomorrow`.
-4. Check the run log for any `[ERROR]` lines if the notification was not received.
+2. If events exist for tomorrow → LINE message arrives within seconds.
+3. If no events → skill completes silently; check run log for `[INFO] No events tomorrow`.
+4. Any `[ERROR]` lines in the run log indicate connector or LINE issues.
 
 #### 6. Skill Guardrails
 
 | Guardrail | Behaviour |
 |-----------|-----------|
-| No Bash / shell / git CLI | GitHub MCP connector + WebFetch only |
+| No Bash / shell / git CLI | MCP connectors + WebFetch only |
 | GitHub connector unavailable | Abort run; log timestamped error |
+| Google Calendar connector unavailable | Abort run; log timestamped error |
 | `LINE_*` env vars absent | Skip LINE step; skill completes normally |
 | LINE API HTTP non-200 | Log error (status + body); no silent retry |
 | No events tomorrow | Exit quietly; no LINE message sent |
-| Google token refresh failure | Abort; log HTTP status and response body |
-| Google Calendar API non-200 | Abort; log HTTP status and response body |
-
----
-
-## Skill 1 — Guardrails
-
-| Guardrail | Behaviour |
-|-----------|----------|
-| No Bash/shell/git CLI | Skill uses only GitHub MCP connector + WebFetch |
-| Unverifiable guideline | Excluded from article; logged in `sources.md` under Unverified Attempts |
-| GitHub connector unavailable | Abort run, log error, do not publish |
-| `LINE_*` env vars absent | Skip LINE step; commit proceeds normally |
-| LINE API HTTP non-200 | Log error with status + body; no silent retry |
-| Fabricated content | Strictly forbidden — every fact must cite a primary source |
-
----
-
-## Skill 1 — Output Format
-
-Each run produces `articles/DD-MM-YYYY-brief.md` with:
-
-- **TL;DR** — 3 bullets (also sent via LINE)
-- **Background** — context and scope
-- **What Changed** — delta from previous guideline
-- **Thai Context Analysis** — applicability, drug availability, implementation barriers
-- **Action Items** — role-specific table (Clinician / Pharmacist / Policy)
-- **References** — numbered, primary sources only
 
 ---
 
@@ -229,22 +182,31 @@ Each run produces `articles/DD-MM-YYYY-brief.md` with:
 
 ---
 
-## Local Development
+## Skill 1 — Guardrails
 
-Both skills are designed for Claude Remote Routine. For local testing:
+| Guardrail | Behaviour |
+|-----------|----------|
+| No Bash/shell/git CLI | GitHub MCP connector + WebFetch only |
+| Unverifiable guideline | Excluded from article; logged in `sources.md` |
+| GitHub connector unavailable | Abort run, log error, do not publish |
+| `LINE_*` env vars absent | Skip LINE step; commit proceeds normally |
+| LINE API HTTP non-200 | Log error with status + body; no silent retry |
+| Fabricated content | Strictly forbidden — cite or exclude |
+
+---
+
+## Local Development
 
 1. Copy `env.example` → `.env` and fill in values.
 2. Open a Claude Code session in this directory.
-3. Run `/Calendar-Event-Check` or `/Claude-Routine-Guideline-Update [TOPIC]` in the Claude Code terminal.
-4. Skills execute using your local GitHub MCP server and WebFetch for external APIs.
-
-> Note: Local runs still call LINE and Google APIs via WebFetch — ensure all env vars are set if you want to test the full flow.
+3. Run `/Calendar-Event-Check` or `/Claude-Routine-Guideline-Update [TOPIC]`.
+4. Skills use your local MCP servers; LINE is called via WebFetch.
 
 ---
 
 ## Contributing
 
-- To improve the analysis framework, edit `reference/perspectives.md` and submit a PR.
-- To change the article template, edit `.claude/skills/Claude-Routine-Guideline-Update/skill.md` (Step 4 section).
-- To adjust the calendar notification format, edit `.claude/skills/Calendar-Event-Check/skill.md` (Step 5 section).
+- Analysis framework: edit `reference/perspectives.md`.
+- Article template: edit `.claude/skills/Claude-Routine-Guideline-Update/skill.md` (Step 4).
+- Calendar notification format: edit `.claude/skills/Calendar-Event-Check/skill.md` (Step 4).
 - Issues and PRs welcome.

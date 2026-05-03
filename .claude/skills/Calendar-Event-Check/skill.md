@@ -1,7 +1,7 @@
 # Calendar-Event-Check
 
 > **Runtime target:** Claude Remote Routine (web sandbox)  
-> **Constraint:** No Bash / shell / git CLI — all I/O via GitHub MCP connector and WebFetch only.
+> **Constraint:** No Bash / shell / git CLI — all I/O via MCP connectors and WebFetch only.
 
 ## Invocation
 
@@ -11,123 +11,102 @@
 
 No arguments. Runs once per invocation: checks tomorrow's Google Calendar events and optionally sends a LINE notification.
 
+## Required Connectors
+
+| Connector | Purpose |
+|-----------|---------|
+| **GitHub** | Liveness check — abort if unavailable |
+| **Google Calendar** | Read tomorrow's events |
+
+Both connectors must be connected in **claude.ai → Settings → Connectors** before the Routine runs.
+
 ---
 
 ## Execution Flow
 
-### Step 0 — Verify GitHub connector
+### Step 0 — Verify connectors
 
-Attempt to read `README.md` from the repository via the GitHub MCP connector.
-
-- Call succeeds → proceed to Step 1.
-- Connector returns an error or is unavailable → **abort immediately** and log:
+**GitHub connector:** Attempt to read `README.md` via the GitHub MCP connector.
+- Succeeds → continue.
+- Error / unavailable → **abort** and log:
   ```
   [ERROR] GitHub connector unavailable at <ISO-8601 timestamp UTC+7>. Skill aborted.
   ```
-  Do not execute any further step.
+
+**Google Calendar connector:** Attempt a minimal call (e.g. list calendars or list events with a narrow window) to confirm the connector is live.
+- Succeeds → continue.
+- Error / unavailable → **abort** and log:
+  ```
+  [ERROR] Google Calendar connector unavailable at <ISO-8601 timestamp UTC+7>. Skill aborted.
+  ```
 
 ### Step 1 — Compute tomorrow's date (Asia/Bangkok)
 
 1. Obtain current UTC time from the Claude runtime context.
 2. Add **7 hours** to convert to Asia/Bangkok (UTC+7).
 3. Add **1 day** to obtain tomorrow.
-4. Derive the following values (all in UTC+7):
-   - `TOMORROW_DATE` — `YYYY-MM-DD` (e.g. `2026-05-04`)
-   - `TIME_MIN` — `YYYY-MM-DDT00:00:00+07:00`
-   - `TIME_MAX` — `YYYY-MM-DDT00:00:00+07:00` for the day after tomorrow
-   - `DISPLAY_DATE` — Thai short format `DD Mmm BBBB` where BBBB = Gregorian year + 543
+4. Derive:
+   - `TOMORROW_DATE` — `YYYY-MM-DD`
+   - `TIME_MIN` — `YYYY-MM-DDT00:00:00+07:00` (start of tomorrow Bangkok)
+   - `TIME_MAX` — `YYYY-MM-DDT00:00:00+07:00` (start of the day after tomorrow)
+   - `DISPLAY_DATE` — Thai short format `DD Mmm BBBB` (Buddhist Era = Gregorian + 543)
      - Thai month abbreviations: ม.ค. ก.พ. มี.ค. เม.ย. พ.ค. มิ.ย. ก.ค. ส.ค. ก.ย. ต.ค. พ.ย. ธ.ค.
      - Example: `04 พ.ค. 2569`
 
-### Step 2 — Refresh Google OAuth access token
+### Step 2 — Fetch tomorrow's events via Google Calendar connector
 
-Use **WebFetch** (POST) to obtain a fresh access token:
+Call the **Google Calendar MCP connector** to list events:
 
-```
-POST https://oauth2.googleapis.com/token
-Content-Type: application/x-www-form-urlencoded
-
-client_id={GOOGLE_CLIENT_ID}
-&client_secret={GOOGLE_CLIENT_SECRET}
-&refresh_token={GOOGLE_REFRESH_TOKEN}
-&grant_type=refresh_token
-```
-
-- HTTP 200 → extract `access_token` from the JSON response body. Store as `ACCESS_TOKEN`.
-- HTTP non-200 → **abort** and log:
-  ```
-  [ERROR] Google token refresh failed at <timestamp>: HTTP {status} — {body}
-  ```
-
-### Step 3 — Fetch tomorrow's events from Google Calendar
-
-Use **WebFetch** (GET) to call the Calendar Events list API:
-
-```
-GET https://www.googleapis.com/calendar/v3/calendars/{GOOGLE_CALENDAR_ID}/events
-    ?timeMin={TIME_MIN}
-    &timeMax={TIME_MAX}
-    &singleEvents=true
-    &orderBy=startTime
-    &maxResults=50
-Authorization: Bearer {ACCESS_TOKEN}
-```
-
-URL-encode the `+` in the timezone offset (`+07:00` → `%2B07%3A00`).
+- **Calendar:** use `GOOGLE_CALENDAR_ID` env var if set; otherwise use the primary calendar of the connected account.
+- **Time range:** `TIME_MIN` → `TIME_MAX` (full day in Asia/Bangkok).
+- **Options:** expand recurring events (`singleEvents=true`), order by start time.
 
 Response handling:
-- HTTP 200 → parse JSON. Extract the `items` array.
-  - `items` empty or absent → proceed to **Step 4a** (no events).
-  - `items` non-empty → proceed to **Step 4b** (events found).
-- HTTP non-200 → **abort** and log:
+- Events returned → proceed to **Step 3b** (events found).
+- Empty list → proceed to **Step 3a** (no events).
+- Connector error → **abort** and log:
   ```
-  [ERROR] Google Calendar API returned {status} at <timestamp>: {body}
+  [ERROR] Google Calendar connector returned an error at <timestamp>: {error detail}
   ```
 
-### Step 4a — No events tomorrow
+### Step 3a — No events tomorrow
 
-If `items` is empty:
-
-- Log: `[INFO] No events tomorrow ({TOMORROW_DATE}). Skill completed with no action.`
+- Log: `[INFO] No events tomorrow (TOMORROW_DATE). Skill completed with no action.`
 - **Stop. Do not send any LINE notification.**
 
-### Step 4b — Events found — format event list
+### Step 3b — Events found — format event list
 
-For each object in `items`, extract:
+For each event, extract:
 
-| Field | Source field | Fallback |
-|-------|-------------|----------|
+| Field | Source | Fallback |
+|-------|--------|----------|
 | Title | `summary` | `"(ไม่มีชื่อ)"` |
 | Start | `start.dateTime` | `start.date` (all-day) |
 | End | `end.dateTime` | `end.date` (all-day) |
 
 Format each event as one line:
-
 - Timed event: `• {title} — {HH:MM} น. – {HH:MM} น.`
 - All-day event: `• {title} — ทั้งวัน`
 
-All times must be converted to **Asia/Bangkok (UTC+7)** before display.
+All times must be displayed in **Asia/Bangkok (UTC+7)**. Convert from UTC or any other offset before display.
 
-If `start.dateTime` ends in `Z` (UTC), add 7 hours. If it carries a numeric offset, convert accordingly.
+### Step 4 — Send LINE notification
 
-### Step 5 — Send LINE notification
-
-**Skip this entire step** if `LINE_CHANNEL_ACCESS_TOKEN` or `LINE_TO` is absent from the environment. The skill still completes normally.
+**Skip this entire step** if `LINE_CHANNEL_ACCESS_TOKEN` or `LINE_TO` is absent. Skill still completes normally.
 
 Compose the message text:
 
 ```
-📅 นัดหมายพรุ่งนี้ ({DISPLAY_DATE})
+📅 นัดหมายพรุ่งนี้ (DISPLAY_DATE)
 
 {event line 1}
 {event line 2}
 …
 
-รวม {N} รายการ
+รวม N รายการ
 ```
 
-Example output:
-
+Example:
 ```
 📅 นัดหมายพรุ่งนี้ (04 พ.ค. 2569)
 
@@ -147,19 +126,14 @@ Authorization: Bearer {LINE_CHANNEL_ACCESS_TOKEN}
 
 {
   "to": "{LINE_TO}",
-  "messages": [
-    {
-      "type": "text",
-      "text": "{message}"
-    }
-  ]
+  "messages": [{"type": "text", "text": "{message}"}]
 }
 ```
 
 Handling:
 - HTTP 200 → log `[INFO] LINE notification sent successfully at <timestamp>.`
 - HTTP non-200 → log `[ERROR] LINE API returned {status}: {body}`. **Do not retry.**
-- WebFetch / network error → log `[ERROR] LINE WebFetch failed: {error}`. Do not block skill completion.
+- WebFetch error → log `[ERROR] LINE WebFetch failed: {error}`. Do not block completion.
 
 ---
 
@@ -167,14 +141,13 @@ Handling:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GOOGLE_CALENDAR_ID` | Yes | Calendar ID — use `primary` for the account's main calendar, or a full address like `name@group.calendar.google.com` |
-| `GOOGLE_CLIENT_ID` | Yes | OAuth 2.0 client ID from Google Cloud Console |
-| `GOOGLE_CLIENT_SECRET` | Yes | OAuth 2.0 client secret |
-| `GOOGLE_REFRESH_TOKEN` | Yes | Long-lived offline refresh token (obtained once via OAuth consent flow) |
+| `GITHUB_REPO_OWNER` | Yes | GitHub username / org owning this repository |
+| `GITHUB_REPO_NAME` | Yes | Repository name |
+| `GOOGLE_CALENDAR_ID` | No | Calendar ID — defaults to `primary` if absent |
 | `LINE_CHANNEL_ACCESS_TOKEN` | No | LINE Messaging API long-lived channel access token |
-| `LINE_TO` | No | Recipient — LINE User ID (`U…`) or Group ID (`C…`) |
-| `GITHUB_REPO_OWNER` | Yes | GitHub username / organisation owning this repository |
-| `GITHUB_REPO_NAME` | Yes | Repository name (e.g. `claude-routine-guideline-update`) |
+| `LINE_TO` | No | LINE User ID (`U…`) or Group ID (`C…`) |
+
+> Google OAuth credentials (CLIENT_ID / CLIENT_SECRET / REFRESH_TOKEN) are **not needed** — authentication is handled entirely by the Google Calendar connector.
 
 ---
 
@@ -182,11 +155,9 @@ Handling:
 
 All date/time values use **Asia/Bangkok (UTC+7)**.
 
-Conversion rule (no system clock / no shell):
-1. Obtain the current UTC epoch from the Claude runtime context.
+1. Obtain current UTC epoch from the Claude runtime context.
 2. Add **25 200 seconds** (7 × 3 600) to get Bangkok epoch.
-3. Derive wall-clock date/time from that adjusted epoch.
-4. Always append `+07:00` when constructing RFC 3339 strings for API calls.
+3. Always append `+07:00` when constructing RFC 3339 strings.
 
 ---
 
@@ -194,10 +165,10 @@ Conversion rule (no system clock / no shell):
 
 | Rule | Behaviour |
 |------|-----------|
-| No Bash / shell / git CLI | GitHub MCP connector + WebFetch only |
-| GitHub connector unavailable | Abort entire run; log timestamped error |
+| No Bash / shell / git CLI | MCP connectors + WebFetch only |
+| GitHub connector unavailable | Abort; log timestamped error |
+| Google Calendar connector unavailable | Abort; log timestamped error |
+| Calendar connector returns error | Abort; log error detail |
+| No events tomorrow | Exit quietly — no LINE message sent |
 | `LINE_*` env vars absent | Skip LINE step; skill completes normally |
 | LINE API HTTP non-200 | Log error (status + body); no silent retry |
-| No events tomorrow | Exit quietly; no LINE message sent |
-| Google token refresh failure | Abort; log HTTP status and response body |
-| Google Calendar API non-200 | Abort; log HTTP status and response body |
