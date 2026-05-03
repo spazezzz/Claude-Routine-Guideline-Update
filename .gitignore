@@ -3,6 +3,12 @@
 .env.local
 .env.*.local
 
+# OAuth token caches (never commit)
+token.json
+credentials.json
+*.token
+*.credentials
+
 # macOS
 .DS_Store
 
