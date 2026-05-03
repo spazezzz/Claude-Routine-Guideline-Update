@@ -1,0 +1,21 @@
+# Local environment — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node (if any tooling is added later)
+node_modules/
+
+# Python (if any tooling is added later)
+__pycache__/
+*.pyc
+.venv/
